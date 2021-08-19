@@ -1,5 +1,7 @@
 import subprocess
+import traceback
 from datetime import timedelta
+from time import sleep
 from typing import List
 
 from datetime import datetime
@@ -26,28 +28,29 @@ def get_tt_video_id(url: str) -> str:
     return a[-1][-1]
 
 
+tt_session = requests.sessions.Session()
+
+
+def renew_session():
+    tt_session.close()
+
+
 def download_tt(tt_link) -> str:
     l = log.getLogger("download_tt")
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) '
-                      'Chrome/39.0.2171.95 Safari/537.36'}
     try:
-        response = requests.get(tt_link, headers=headers)
-    except Exception as e:
-        l.getChild('request').error(e)
-        raise e
-    
-    if response.status_code != 200:
-        l.getChild('response').error(f"status code is {response.status_code}")
-        raise Exception("can't get tt video id")
-    
-    api = TikTokAPI(cookie=response.cookies)
+        response = tt_session.get(tt_link)
+    except:
+        renew_session()
+        response = tt_session.get(tt_link)
+        
+    api = TikTokAPI(cookie=tt_session.cookies)
     cwd = os.getcwd()
     vid = get_tt_video_id(response.url)
     file_path = cwd + '\\' + vid + '.mp4'
     api.downloadVideoById(vid, file_path)
     response.close()
+    
     return file_path
 
 
@@ -57,7 +60,7 @@ def split_video(video_path: str, part_len=14) -> List[str]:
     dur = metadata.video[0].duration_seconds()
     if dur <= part_len:
         return [video_path]
-    if dur / 4 > part_len:
+    if dur / 8 > part_len:
         return []
     
     for i in range(int(dur + part_len / 2) // part_len):
@@ -84,27 +87,31 @@ def process_tt_msg(event: VkBotMessageEvent):
         tt_video = uploader.story(vids[0], 'video', group_id=GROUP_ID, link_text="more",
                                   link_url=r"https://vk.com/donut/public206314659")
     except Exception as e:
-        l.error(e)
+        l.getChild("can't upload story").error(e)
         return
     
     data = tt_video.json()
     attstr = f"story{data['response']['story']['owner_id']}_{data['response']['story']['id']}"
     
-    vk.messages.send(peer_id=peer_id,
-                     attachment=attstr,
-                     random_id=get_random_id())
+    try:
+        vk.messages.send(peer_id=peer_id,
+                         attachment=attstr,
+                         random_id=get_random_id())
+    except Exception as e:
+        l.getChild("can't send vk message").error(e)
     
     for vid in vids[1:]:
+        sleep(0.5)
         try:
             uploader.story(vid, 'video', group_id=GROUP_ID)
         except Exception as e:
-            l.error(e)
+            l.getChild("can't upload story").error(e)
     
     for v in vids:
         try:
             os.remove(v)
         except Exception as e:
-            l.error(e)
+            l.getChild("can't remove file").error(e)
 
 
 if __name__ == "__main__":
@@ -134,4 +141,5 @@ if __name__ == "__main__":
                         users[sender] = datetime.now()
                         process_tt_msg(event)
         except Exception as e:
-            l.error(e)
+            l.exception(e)
+            renew_session()
