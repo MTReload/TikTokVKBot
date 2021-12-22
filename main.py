@@ -28,10 +28,8 @@ def get_tt_video_id(url: str) -> str:
     return a[-1][-1]
 
 
-tt_session = requests.sessions.Session()
-
-
-def renew_session():
+def renew_tt_session():
+    global tt_session
     tt_session.close()
 
 
@@ -41,9 +39,9 @@ def download_tt(tt_link) -> str:
     try:
         response = tt_session.get(tt_link)
     except:
-        renew_session()
+        renew_tt_session()
         response = tt_session.get(tt_link)
-        
+    
     api = TikTokAPI(cookie=tt_session.cookies)
     cwd = os.getcwd()
     vid = get_tt_video_id(response.url)
@@ -114,16 +112,43 @@ def process_tt_msg(event: VkBotMessageEvent):
             l.getChild("can't remove file").error(e)
 
 
+def process_da_msg(event: VkBotMessageEvent):
+    peer_id = event.obj.get('peer_id')
+    from_id = event.obj.get('from_id')
+    vk.messages.setActivity(peer_id=peer_id, type="typing")
+    
+    vk.messages.send(peer_id=peer_id,
+                     message="пизда",
+                     random_id=get_random_id())
+
+
+def renew_vk_logpoll():
+    global _vk_session
+    global vk_session
+    global longpoll
+    global GROUP_ID
+    
+    _vk_session.close()
+    vk_session = vk_api.VkApi(token=os.getenv("BOT_TOKEN"), session=_vk_session)
+    longpoll = VkBotLongPoll(vk_session, GROUP_ID)
+
+
 if __name__ == "__main__":
     log.basicConfig(level=log.INFO)
     l = log.getLogger("main")
-    vk_session = vk_api.VkApi(token=os.getenv("BOT_TOKEN"))
+    
+    tt_session = requests.sessions.Session()
+    _vk_session = requests.sessions.Session()
+    
+    vk_session = vk_api.VkApi(token=os.getenv("BOT_TOKEN"), session=_vk_session)
     GROUP_ID = int(os.getenv("GROUP_ID"))
     longpoll = VkBotLongPoll(vk_session, GROUP_ID)
+    
     vk = vk_session.get_api()
     uploader = VkUpload(vk)
     
-    TIKTOK_SUBSTRING = 'https://vm.tiktok.com'
+    TIKTOK_SUBSTRING_1 = 'https://vm.tiktok.com'
+    TIKTOK_SUBSTRING_2 = 'https://www.tiktok.com'
     
     l.info("start")
     
@@ -132,14 +157,24 @@ if __name__ == "__main__":
             l.info('listen')
             for event in longpoll.listen():
                 if event.type == VkBotEventType.MESSAGE_NEW:
+                    peer_id = event.obj.get('peer_id')
                     text: str = event.obj.get('text')
                     sender = event.obj.get('from_id')
-                    if text.find(TIKTOK_SUBSTRING) != -1:
+                    if text.lower == "да" and peer_id == 2000000002:
+                        if sender in users:
+                            if (datetime.now() - users[sender]).seconds < 20:
+                                continue
+                        users[sender] = datetime.now()
+                        process_da_msg(event)
+                    if text.find(TIKTOK_SUBSTRING_1) != -1 or text.find(TIKTOK_SUBSTRING_2) != -1:
                         if sender in users:
                             if (datetime.now() - users[sender]).seconds < 20:
                                 continue
                         users[sender] = datetime.now()
                         process_tt_msg(event)
+        except requests.exceptions.ReadTimeout:
+            pass
         except Exception as e:
             l.exception(e)
-            renew_session()
+            renew_vk_logpoll()
+            renew_tt_session()
